@@ -1,0 +1,39 @@
+#include "stm32f10x.h"
+
+void Stepper_Init(void) {
+    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN | RCC_APB2ENR_IOPBEN;
+    
+    // Configure PB12, PB13, PB14, PB15 (Stepper) as Output Push-Pull (2MHz)
+    GPIOB->CRH &= ~(0xFFFF0000);
+    GPIOB->CRH |=  (0x022220000);
+    
+    // Configure PA9, PA10, PA11, PA12 (4 Green LEDs) as Output Push-Pull (2MHz)
+    GPIOA->CRH &= ~(0x000FFFF0);
+    GPIOA->CRH |=  (0x00022220);
+}
+
+void Stepper_Delay(uint32_t ms) {
+    for (volatile uint32_t i = 0; i < ms * 4000; i++);
+}
+
+void Stepper_Step(int direction) {
+    const uint16_t step_lookup[4] = { (1 << 12), (1 << 13), (1 << 14), (1 << 15) };
+    static int current_step = 0;
+    
+    if (direction == 1) {
+        current_step = (current_step + 1) % 4;
+    } else {
+        current_step = (current_step - 1 + 4) % 4;
+    }
+    
+    GPIOB->ODR &= ~(0xF000);
+    GPIOB->ODR |= step_lookup[current_step];
+    Stepper_Delay(5); 
+}
+
+void Trigger_Detonation_Mechanism(void) {
+    for (int i = 0; i < 512; i++) { 
+        Stepper_Step(1);
+    }
+    GPIOB->ODR &= ~(0xF000); 
+}
