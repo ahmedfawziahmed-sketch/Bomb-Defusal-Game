@@ -1,0 +1,105 @@
+#include "stm32f10x.h"
+#include <string.h>
+
+extern volatile int seconds_left;
+extern volatile int game_over;
+extern volatile int hint_requested;
+
+void TM1637_Init(void);
+void TM1637_DisplayTime(int seconds);
+void Timer2_Init(void);
+void I2C1_Init(void);
+void LCD_Init(void);
+void LCD_Print(char *str);
+void LCD_SendCommand(uint8_t cmd);
+void Keypad_Init(void);
+char Keypad_Scan(void);
+void Stepper_Init(void);
+void Trigger_Detonation_Mechanism(void);
+void ExternalButton_Init(void);
+
+int main(void) {
+    // Hardware Setup Execution Loop
+    TM1637_Init();
+    I2C1_Init();
+    LCD_Init();
+    Keypad_Init();
+    Stepper_Init();
+    ExternalButton_Init();
+    Timer2_Init(); 
+
+    char entered_code[5] = {0};
+    int input_index = 0;
+    char target_secret[] = "147B"; 
+    
+    LCD_Print("Enter Code:");
+    
+    while (1) {
+        TM1637_DisplayTime(seconds_left);
+        
+        // Handle Member 5 Pushbutton Event
+        if (hint_requested) {
+            hint_requested = 0;
+            LCD_SendCommand(0x01); 
+            LCD_Print("HINT: Steps 147!");
+            for(volatile int delay=0; delay<2000000; delay++); 
+            LCD_SendCommand(0x01);
+            LCD_Print("Enter Code:");
+            input_index = 0;
+            memset(entered_code, 0, sizeof(entered_code));
+        }
+        
+        // Read input from Member 3 Keypad
+        char pressed_key = Keypad_Scan();
+        if (pressed_key != 0) {
+            if (pressed_key == '#') { 
+                if (strcmp(entered_code, target_secret) == 0) {
+                    game_over = 1; // Win state confirmed
+                } else {
+                    // Mismatch Rule: Deduct exactly 5 seconds
+                    if (seconds_left > 5) seconds_left -= 5;
+                    else seconds_left = 1;
+                    
+                    LCD_SendCommand(0x01);
+                    LCD_Print("WRONG! -5s Retry:");
+                    input_index = 0;
+                    memset(entered_code, 0, sizeof(entered_code));
+                }
+            } 
+            else if (pressed_key == '*') { 
+                input_index = 0;
+                memset(entered_code, 0, sizeof(entered_code));
+                LCD_SendCommand(0x01);
+                LCD_Print("Enter Code:");
+            } 
+            else if (input_index < 4) { 
+                entered_code[input_index++] = pressed_key;
+                LCD_SendData(pressed_key); 
+            }
+        }
+        
+        // WIN STATE: Success code validated
+        if (game_over == 1) {
+            TIM2->CR1 &= ~TIM_CR1_CEN; // Freeze countdown core clock
+            
+            // System safety override overrides
+            GPIOB->ODR &= ~(0xF << 8); // Clear Red LEDs
+            GPIOB->ODR &= ~(1 << 5);   // Shut down countdown buzzer
+            
+            // Trigger 4 Green LEDs ON
+            GPIOA->ODR |= (0xF << 9);  // Force PA9, PA10, PA11, PA12 High
+            
+            LCD_SendCommand(0x01);
+            LCD_Print("SAFE! DEFUSED.");
+            while(1);
+        }
+        
+        // FAILURE STATE: Clock timeout occurred
+        if (game_over == 2) {
+            LCD_SendCommand(0x01);
+            LCD_Print("BOOM! TIMEOUT.");
+            Trigger_Detonation_Mechanism(); 
+            while(1);
+        }
+    }
+}
